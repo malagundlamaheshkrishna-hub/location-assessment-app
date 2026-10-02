@@ -9,10 +9,13 @@ from backend.services.geocoder import geocode_address
 
 client = TestClient(app)
 
+MOCK_GEO_SUCCESS = {"available": True, "latitude": 38.8977, "longitude": -77.0365}
+
+
 def test_invalid_elevation_url_workflow():
     """
     Failure handling verification:
-    With elevation URL set to an invalid address:
+    When elevation service returns unavailable:
     1. Submit a valid location.
     2. Elevation API is unavailable.
     3. Confirm assessment is still saved.
@@ -20,7 +23,10 @@ def test_invalid_elevation_url_workflow():
     5. Confirm elevation is None (frontend displays 'Unavailable').
     6. Confirm elevation is NOT shown as 0.
     """
-    with patch("backend.services.elevation.USGS_EPQS_URL", "https://epqs-invalid-subdomain.nationalmap.gov/v1/json"):
+    mock_weather = {"available": True, "temperature": 22.5}
+    with patch("backend.main.geocode_address", return_value=MOCK_GEO_SUCCESS), \
+         patch("backend.main.get_elevation", return_value={"available": False, "error": "Service unavailable"}), \
+         patch("backend.main.get_weather", return_value=mock_weather):
         response = client.post("/assessments", json={
             "label": "Failure Test Location",
             "address": "1600 Pennsylvania Avenue NW, Washington, DC"
@@ -33,20 +39,19 @@ def test_invalid_elevation_url_workflow():
         assert data["address"] == "1600 Pennsylvania Avenue NW, Washington, DC"
         
         # Coordinates from geocoder should succeed
-        assert data["latitude"] is not None
-        assert data["longitude"] is not None
+        assert data["latitude"] == 38.8977
+        assert data["longitude"] == -77.0365
         
-        # 4. Confirm temperature is still fetched and available
-        assert data["temperature"] is not None
-        assert isinstance(data["temperature"], (int, float))
-        assert data["temperature_score"] is not None
+        # 4. Confirm temperature is still fetched and available (22.5°C -> 60.0 pts)
+        assert data["temperature"] == 22.5
+        assert data["temperature_score"] == 60.0
         
         # 5 & 6. Confirm elevation is None (NOT 0)
         assert data["elevation"] is None
         assert data["elevation_score"] is None
         
         # Total score should only be based on temperature, not penalized by 0
-        assert data["total_score"] == data["temperature_score"]
+        assert data["total_score"] == 60.0
         assert data["status"] == "partial"
         
         # Verify persisted in SQLite
@@ -55,31 +60,35 @@ def test_invalid_elevation_url_workflow():
         saved = get_res.json()
         assert saved["id"] == data["id"]
         assert saved["elevation"] is None
-        assert saved["temperature"] == data["temperature"]
-        assert saved["total_score"] == data["temperature_score"]
+        assert saved["temperature"] == 22.5
+        assert saved["total_score"] == 60.0
         assert saved["status"] == "partial"
 
 
 def test_restored_elevation_url_workflow():
     """
-    Verification after restoring the valid elevation endpoint URL:
-    Confirm full complete assessment works with real external services.
+    Verification of complete assessment workflow when both services succeed.
     """
-    response = client.post("/assessments", json={
-        "label": "Restored URL Test",
-        "address": "1600 Pennsylvania Avenue NW, Washington, DC"
-    })
-    assert response.status_code == 201
-    data = response.json()
-    assert data["id"] is not None
-    assert data["latitude"] is not None
-    assert data["longitude"] is not None
-    assert data["elevation"] is not None
-    assert data["temperature"] is not None
-    assert data["elevation_score"] is not None
-    assert data["temperature_score"] is not None
-    assert data["total_score"] is not None
-    assert data["status"] == "complete"
+    mock_elev = {"available": True, "elevation": 54.0}
+    mock_weather = {"available": True, "temperature": 20.0}
+    with patch("backend.main.geocode_address", return_value=MOCK_GEO_SUCCESS), \
+         patch("backend.main.get_elevation", return_value=mock_elev), \
+         patch("backend.main.get_weather", return_value=mock_weather):
+        response = client.post("/assessments", json={
+            "label": "Restored URL Test",
+            "address": "1600 Pennsylvania Avenue NW, Washington, DC"
+        })
+        assert response.status_code == 201
+        data = response.json()
+        assert data["id"] is not None
+        assert data["latitude"] == 38.8977
+        assert data["longitude"] == -77.0365
+        assert data["elevation"] == 54.0
+        assert data["temperature"] == 20.0
+        assert data["elevation_score"] == 40.0
+        assert data["temperature_score"] == 60.0
+        assert data["total_score"] == 100.0
+        assert data["status"] == "complete"
 
 
 @pytest.mark.asyncio
@@ -109,7 +118,10 @@ async def test_graceful_timeout_handling_service_level():
 
 def test_workflow_elevation_timeout_handled_gracefully():
     """Verify full POST /assessments workflow when elevation service times out."""
-    with patch("backend.main.get_elevation", return_value={"available": False, "error": "Request to USGS Elevation service timed out after 10.0s."}):
+    mock_weather = {"available": True, "temperature": 18.0}
+    with patch("backend.main.geocode_address", return_value=MOCK_GEO_SUCCESS), \
+         patch("backend.main.get_elevation", return_value={"available": False, "error": "Request to USGS Elevation service timed out after 10.0s."}), \
+         patch("backend.main.get_weather", return_value=mock_weather):
         response = client.post("/assessments", json={
             "label": "Elevation Timeout Test",
             "address": "1600 Pennsylvania Avenue NW, Washington, DC"
@@ -119,27 +131,30 @@ def test_workflow_elevation_timeout_handled_gracefully():
         assert data["id"] is not None
         assert data["elevation"] is None
         assert data["elevation_score"] is None
-        assert data["temperature"] is not None
+        assert data["temperature"] == 18.0
+        assert data["temperature_score"] == 60.0
+        assert data["total_score"] == 60.0
         assert data["status"] == "partial"
 
 
 def test_workflow_weather_timeout_handled_gracefully():
     """Verify full POST /assessments workflow when weather service times out."""
-    with patch("backend.main.get_weather", return_value={"available": False, "error": "Request to Open-Meteo timed out after 10.0s."}):
-        with patch("backend.main.get_elevation", return_value={"available": True, "elevation": 120.0}):
-            response = client.post("/assessments", json={
-                "label": "Weather Timeout Test",
-                "address": "1600 Pennsylvania Avenue NW, Washington, DC"
-            })
-            assert response.status_code == 201
-            data = response.json()
-            assert data["id"] is not None
-            assert data["elevation"] == 120.0
-            assert data["elevation_score"] == 40.0
-            assert data["temperature"] is None
-            assert data["temperature_score"] is None
-            assert data["total_score"] == 40.0
-            assert data["status"] == "partial"
+    with patch("backend.main.geocode_address", return_value=MOCK_GEO_SUCCESS), \
+         patch("backend.main.get_weather", return_value={"available": False, "error": "Request to Open-Meteo timed out after 10.0s."}), \
+         patch("backend.main.get_elevation", return_value={"available": True, "elevation": 120.0}):
+        response = client.post("/assessments", json={
+            "label": "Weather Timeout Test",
+            "address": "1600 Pennsylvania Avenue NW, Washington, DC"
+        })
+        assert response.status_code == 201
+        data = response.json()
+        assert data["id"] is not None
+        assert data["elevation"] == 120.0
+        assert data["elevation_score"] == 40.0
+        assert data["temperature"] is None
+        assert data["temperature_score"] is None
+        assert data["total_score"] == 40.0
+        assert data["status"] == "partial"
 
 
 def test_workflow_geocoder_timeout_handled_gracefully():
