@@ -1,0 +1,112 @@
+# ==========================================
+# Environment Variables & Secrets (CRITICAL)
+# ==========================================
+.env
+.env.*
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+*.env
+*.env.*
+
+# Allow example files to be committed
+!.env.example
+!.env.*.example
+
+# ==========================================
+# Database & Local Storage Files
+# ==========================================
+*.db
+*.sqlite
+*.sqlite3
+locations.db
+backend/locations.db
+
+# ==========================================
+# Python & Virtual Environments
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.mypy_cache/
+.ruff_cache/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+.env_venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ==========================================
+# JavaScript / Node / Frontend (React + Vite)
+# ==========================================
+node_modules/
+frontend/node_modules/
+dist/
+dist-ssr/
+frontend/dist/
+frontend/dist-ssr/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.npm/
+
+# ==========================================
+# Editor & IDE Configs
+# ==========================================
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swo
+*.swp
+
+# ==========================================
+# Operating System & Cache Files
+# ==========================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
